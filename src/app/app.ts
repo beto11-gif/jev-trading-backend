@@ -3,7 +3,7 @@ import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import websocket from '@fastify/websocket';
 import WebSocket from 'ws';
-import { BinanceUniverse, universeQuery, universeCandlesQuery } from '../services/binance/universe.js';
+import { BinanceUniverse, MarketAccessError, universeQuery, universeCandlesQuery } from '../services/binance/universe.js';
 import type { Config } from '../config/env.js';
 import { candlesQuerySchema, clientMessageSchema, serverEventSchema } from '../schemas/contracts.js';
 import { BinanceRestClient, UpstreamError } from '../services/binance/rest.js';
@@ -31,6 +31,10 @@ export async function buildApp(config: Config, dependencies: { rest?: BinanceRes
     if (origin && !config.origins.includes(origin)) return reply.code(403).send({ type: 'error', code: 'ORIGIN_FORBIDDEN', message: 'Origin not allowed' });
   });
   app.setErrorHandler((error, _request, reply) => {
+    if (error instanceof MarketAccessError) {
+      app.log.warn({ event: 'binance_access_restricted', upstreamStatus: error.upstreamStatus });
+      return reply.code(503).send({ type: 'error', code: 'MARKET_ACCESS_RESTRICTED', message: 'Binance denied market access from the server location. Check hosting region and Binance availability.', upstreamStatus: error.upstreamStatus });
+    }
     const code = typeof error === 'object' && error !== null && 'statusCode' in error ? error.statusCode : undefined;
     const status = error instanceof UpstreamError ? error.status : typeof code === 'number' && code >= 400 && code < 500 ? code : 500;
     app.log.warn({ event: 'request_failed', status });

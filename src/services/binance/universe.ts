@@ -19,6 +19,9 @@ const exchange = z.object({ symbols: z.array(instrument).max(30000) });
 const numeric = z.string().min(1).transform(Number).pipe(z.number().finite());
 const ticker = z.object({ symbol: z.string(), lastPrice: numeric.pipe(z.number().positive()),
   priceChangePercent: numeric, quoteVolume: numeric.pipe(z.number().nonnegative()), closeTime: z.number().int().nonnegative() });
+export class MarketAccessError extends UpstreamError {
+  constructor(public readonly upstreamStatus: number) { super(503); }
+}
 
 /** Independent read-only universe. Existing four-symbol Spot streams remain untouched. */
 export class BinanceUniverse {
@@ -48,6 +51,7 @@ export class BinanceUniverse {
           this.cooldown.set(market, Date.now() + Math.min(86400, Math.max(60, Number.isFinite(seconds) ? seconds : 60)) * 1000);
           throw new UpstreamError(429);
         }
+        if ([403, 451].includes(response.status)) throw new MarketAccessError(response.status);
         if (!response.ok) throw new UpstreamError();
         const value = parse(await response.json());
         if (this.cache.size >= 256) this.cache.delete(this.cache.keys().next().value!);
