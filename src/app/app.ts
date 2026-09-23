@@ -3,6 +3,7 @@ import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import websocket from '@fastify/websocket';
 import WebSocket from 'ws';
+import { BinanceUniverse, universeQuery, universeCandlesQuery } from '../services/binance/universe.js';
 import type { Config } from '../config/env.js';
 import { candlesQuerySchema, clientMessageSchema, serverEventSchema } from '../schemas/contracts.js';
 import { BinanceRestClient, UpstreamError } from '../services/binance/rest.js';
@@ -13,9 +14,10 @@ import { DisabledJevAnalyzer, type JevAnalyzer } from '../services/jev/analyzer.
 import { AnalysisScheduler } from '../services/analysis/scheduler.js';
 import { SubscriptionManager, type Subscriber } from '../websocket/subscriptions.js';
 
-export async function buildApp(config: Config, dependencies: { rest?: BinanceRestClient; streamFactory?: StreamFactory; analyzer?: JevAnalyzer } = {}) {
+export async function buildApp(config: Config, dependencies: { rest?: BinanceRestClient; universe?: BinanceUniverse; streamFactory?: StreamFactory; analyzer?: JevAnalyzer } = {}) {
   const app = Fastify({ logger: { level: config.LOG_LEVEL, redact: ['req.headers.authorization', 'req.headers.cookie'] }, bodyLimit: 8192, logController: new LogController({ disableRequestLogging: true }) });
   const rest = dependencies.rest ?? new BinanceRestClient(config.BINANCE_REST_URL);
+  const universe = dependencies.universe ?? new BinanceUniverse(config.BINANCE_REST_URL);
   const store = new MarketStateStore();
   const analyzer = dependencies.analyzer ?? new DisabledJevAnalyzer();
   const scheduler = new AnalysisScheduler(analyzer, new MarketProcessor(store), store, config.analysisPeriods, app.log);
@@ -40,6 +42,22 @@ export async function buildApp(config: Config, dependencies: { rest?: BinanceRes
     if (!query.success) return reply.code(400).send({ type: 'error', code: 'INVALID_QUERY', message: 'Expected allowed symbol, interval and integer limit 1..500' });
     const { symbol, interval, limit } = query.data;
     return { symbol, interval, candles: await rest.candles(symbol, interval, limit) };
+  });
+  app.get('/api/markets', async (request, reply) => {
+    const query = universeQuery.safeParse(request.query);
+    if (!query.success) return reply.code(400).send({ code: 'INVALID_QUERY' });
+    return universe.symbols(query.data.market);
+  });
+  app.get('/api/market-snapshot', async (request, reply) => {
+    const query = universeQuery.safeParse(request.query);
+    if (!query.success) return reply.code(400).send({ code: 'INVALID_QUERY' });
+    return universe.snapshot(query.data.market);
+  });
+  app.get('/api/market-candles', async (request, reply) => {
+    const query = universeCandlesQuery.safeParse(request.query);
+    if (!query.success) return reply.code(400).send({ code: 'INVALID_QUERY' });
+    const { market, symbol, interval, limit } = query.data;
+    return universe.candles(market, symbol, interval, limit);
   });
   app.get('/ws', { websocket: true }, socket => {
     if (clients.size >= 1000) { socket.close(1013, 'Server capacity reached'); return; }

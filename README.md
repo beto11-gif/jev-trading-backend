@@ -93,3 +93,21 @@ Conecte este repositório ao Railway quando estiver no GitHub. `railway.json` de
 Uma única réplica é suficiente nesta fase: estado, subscriptions e limites são locais ao processo. Restrições regionais da Binance podem impedir REST/WS no local de deploy; validar com smoke nessa região. Health do processo permanece OK em falhas externas; o status do upstream é informado separadamente.
 
 Referências oficiais consultadas: [Binance market data público](https://github.com/binance/binance-spot-api-docs/blob/master/faqs/market_data_only.md), [streams](https://github.com/binance/binance-spot-api-docs/blob/master/web-socket-streams.md), [REST](https://github.com/binance/binance-spot-api-docs/blob/master/rest-api.md), [Railway health checks](https://docs.railway.com/deployments/healthchecks).
+
+## Universo dinâmico de mercados (alteração local)
+
+Referência anterior: 587777aaffcb0bd1d8d16137a3a484cf34d40189.
+
+Novos endpoints somente leitura:
+- GET /api/markets?market=futures — contratos PERPETUAL, TRADING, underlyingType COIN, margem e cotação USDT.
+- GET /api/markets?market=spot — todos os pares TRADING com isSpotTradingAllowed; inclui diferentes moedas de cotação. Volume de pares com diferentes cotações não deve ser comparado sem conversão.
+- GET /api/market-snapshot?market=futures (ou spot) — estatísticas de 24h em lote, totalEligible e missingSymbols. lastPrice é preço negociado, não Mark Price. quoteVolume está na moeda de cotação.
+- GET /api/market-candles?market=futures&symbol=ADAUSDT&interval=15m&limit=100 — símbolo validado contra catálogo; intervalos existentes e limite 1..500.
+
+Não modifica /api/candles nem /ws: o painel anterior mantém seus quatro símbolos e contratos. O motor frontend ainda precisa consumir os novos endpoints; seu scanner anterior permanece limitado a quatro ativos. Nada foi publicado nem enviado ao GitHub nesta etapa. Configuração CORS permanece explícita; eventual liberação de localhost no Railway é uma configuração separada.
+
+Cache: catálogo 5 minutos, snapshot 15 segundos, candles 10 segundos; máximo 256 entradas. Deduplicação de consultas, máximo quatro requests em voo, timeout de 8 segundos e cooldown compartilhado por mercado em 418/429. Não abre sockets por moeda. Falhas não recebem dados simulados. Não calcula nem garante alavancagem permitida; não chama JEV e não executa operações.
+
+Validação: 16 testes, typecheck, lint e build aprovados. Consulta pública em 23/09/2026: 1373 pares Spot elegíveis (1313 cotações recentes e 60 ausentes/antigas), 526 perpétuos cripto USDT (526 cotações). Contagens são dinâmicas, não constantes.
+
+Documentação oficial utilizada: https://developers.binance.com/en/docs/catalog/core-trading-derivatives-trading-usd-s-m-futures/api/rest-api/market-data
